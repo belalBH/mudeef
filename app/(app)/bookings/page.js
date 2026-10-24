@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { requireUser } from '@/lib/auth';
 import { listBookings, listUnits } from '@/lib/queries';
 import { diffDays, prettyDate, weekday } from '@/lib/dates';
-import { SOURCES, money } from '@/lib/constants';
+import { SOURCES, STAY_STATUSES, money } from '@/lib/constants';
 import PageHead from '@/components/PageHead';
 import { SourceTag, StatusTag } from '@/components/badges';
 
@@ -10,6 +10,8 @@ export const metadata = { title: 'الحجوزات | مُضيف' };
 
 const VIEWS = [
   ['upcoming', 'القادمة والحالية'],
+  ['inhouse', 'المقيمون الآن'],
+  ['due', 'عليها مبالغ'],
   ['past', 'السابقة'],
   ['cancelled', 'الملغاة'],
   ['conflicts', 'التعارضات'],
@@ -37,7 +39,10 @@ export default async function BookingsPage({ searchParams }) {
 
   return (
     <>
-      <PageHead title="الحجوزات">
+      <PageHead title="الحجوزات" sub={`${rows.length} حجز`}>
+        <a href={`/api/export/bookings?${new URLSearchParams({ view, ...(unit ? { unit } : {}), ...(source ? { source } : {}), ...(q ? { q } : {}) })}`} className="btn-ghost">
+          تصدير Excel
+        </a>
         <Link href="/bookings/new" className="btn-primary">حجز جديد</Link>
       </PageHead>
 
@@ -75,11 +80,11 @@ export default async function BookingsPage({ searchParams }) {
 
       {rows.length === 0 ? (
         <div className="panel px-6 py-10 text-center text-muted">
-          {view === 'conflicts' ? 'لا توجد حجوزات متعارضة.' : 'لا توجد حجوزات هنا.'}
+          {view === 'conflicts' ? 'لا توجد حجوزات متعارضة.' : view === 'due' ? 'كل الحجوزات مدفوعة.' : 'لا توجد حجوزات هنا.'}
         </div>
       ) : (
         <div className="panel overflow-x-auto">
-          <table className="table min-w-[760px]">
+          <table className="table min-w-[860px]">
             <thead>
               <tr>
                 <th>الضيف</th>
@@ -89,6 +94,7 @@ export default async function BookingsPage({ searchParams }) {
                 <th>الليالي</th>
                 <th>المصدر</th>
                 <th>الإجمالي</th>
+                <th>الدفع</th>
                 <th>الحالة</th>
               </tr>
             </thead>
@@ -109,7 +115,13 @@ export default async function BookingsPage({ searchParams }) {
                   <td>{diffDays(b.check_in, b.check_out)}</td>
                   <td><SourceTag source={b.source} /></td>
                   <td>{b.total_amount ? money(b.total_amount) : <span className="text-xs text-saffron">بدون مبلغ</span>}</td>
-                  <td><StatusTag booking={b} /></td>
+                  <td className="text-xs">
+                    {b.total_amount === 0 ? '—' : b.paid_amount >= b.total_amount - 0.5 ? <span className="text-palm">مدفوع</span> : b.paid_amount > 0 ? <span className="text-saffron">جزئي</span> : <span className="text-danger">غير مدفوع</span>}
+                  </td>
+                  <td>
+                    <StatusTag booking={b} />
+                    {b.status !== 'cancelled' && b.stay_status !== 'upcoming' && <div className="mt-1 text-xs text-muted">{STAY_STATUSES[b.stay_status]}</div>}
+                  </td>
                 </tr>
               ))}
             </tbody>

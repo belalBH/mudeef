@@ -42,8 +42,13 @@ export default function UnitForm({ unit }) {
           <p className="hint">اتركه فارغاً إذا كان نفس السعر.</p>
         </div>
         <div className="sm:col-span-2">
+          <label className="label" htmlFor="checkin_info">تعليمات الدخول للضيف</label>
+          <textarea id="checkin_info" name="checkin_info" rows={3} className="field" defaultValue={u.checkin_info || ''} placeholder="الموقع، رقم الدور، رمز القفل، شبكة الواي فاي…" />
+          <p className="hint">تُرسل للضيف في رسالة واتساب "تعليمات الدخول".</p>
+        </div>
+        <div className="sm:col-span-2">
           <label className="label" htmlFor="notes">ملاحظات داخلية</label>
-          <textarea id="notes" name="notes" rows={3} className="field" defaultValue={u.notes || ''} placeholder="رمز القفل، مكان المفتاح، تعليمات التنظيف…" />
+          <textarea id="notes" name="notes" rows={3} className="field" defaultValue={u.notes || ''} placeholder="ملاحظات لك وللفريق فقط" />
         </div>
         {u.id && (
           <label className="flex items-center gap-2 text-sm sm:col-span-2">

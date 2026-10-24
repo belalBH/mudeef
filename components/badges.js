@@ -1,11 +1,10 @@
-import { SOURCES, STATUSES } from '@/lib/constants';
+import { STATUSES, sourceColor, sourceLabel } from '@/lib/constants';
 
 export function SourceTag({ source }) {
-  const s = SOURCES[source] || SOURCES.other;
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm">
-      <span className="h-2.5 w-2.5 rounded-full" style={{ background: s.color }} aria-hidden />
-      {s.label}
+      <span className="h-2.5 w-2.5 rounded-full" style={{ background: sourceColor(source) }} aria-hidden />
+      {sourceLabel(source)}
     </span>
   );
 }

@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { requireUser } from '@/lib/auth';
 import { bookingsInRange, listUnits } from '@/lib/queries';
 import { addDays, addMonths, daysInMonth, diffDays, isWeekend, monthName, parseISO, todayISO } from '@/lib/dates';
-import { SOURCES } from '@/lib/constants';
+import { BLOCK, SOURCES, sourceColor } from '@/lib/constants';
 import ScrollToToday from '@/components/ScrollToToday';
 
 export const metadata = { title: 'التقويم | مُضيف' };
@@ -19,7 +19,7 @@ export default async function CalendarPage({ searchParams }) {
   const days = daysInMonth(ym);
   const to = addDays(from, days);
   const units = listUnits(user.account_id, { activeOnly: true });
-  const bookings = bookingsInRange(user.account_id, from, to);
+  const bookings = bookingsInRange(user.account_id, from, to, { withBlocks: true });
   const dates = Array.from({ length: days }, (_, i) => addDays(from, i));
 
   const byUnit = Object.fromEntries(units.map((u) => [u.id, []]));
@@ -55,12 +55,15 @@ export default async function CalendarPage({ searchParams }) {
           )}
         </div>
         <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted">
-          {Object.entries(SOURCES).map(([k, s]) => (
+          {[...Object.entries(SOURCES), ['block', BLOCK]].map(([k, s]) => (
             <li key={k} className="flex items-center gap-1.5">
               <span className="h-2.5 w-5 rounded-full" style={{ background: s.color }} />
               {s.label}
             </li>
           ))}
+          <li>
+            <Link href="/bookings/new?block=1" className="text-palm hover:underline">إغلاق تواريخ</Link>
+          </li>
         </ul>
       </header>
 
@@ -123,12 +126,13 @@ export default async function CalendarPage({ searchParams }) {
                     const clippedEnd = Math.min(days, endOff);
                     const width = (clippedEnd - clippedStart) * DAY_W - 4;
                     if (width <= 0) return null;
-                    const color = SOURCES[b.source]?.color || SOURCES.other.color;
+                    const color = sourceColor(b.source);
+                    const blk = b.source === 'block';
                     return (
                       <Link
                         key={b.id}
                         href={`/bookings/${b.id}`}
-                        title={`${b.guest_name || 'حجز'}: ${b.check_in} إلى ${b.check_out}`}
+                        title={`${blk ? 'مغلق' : b.guest_name || 'حجز'}: ${b.check_in} إلى ${b.check_out}`}
                         className={`absolute flex items-center overflow-hidden px-2 text-xs font-medium text-white shadow-sm hover:brightness-110 ${
                           b.conflict ? 'ring-2 ring-danger ring-offset-1' : ''
                         } ${startOff < 0.5 ? 'rounded-s-sm' : 'rounded-s-full'} ${endOff > days ? 'rounded-e-sm' : 'rounded-e-full'}`}
@@ -139,10 +143,12 @@ export default async function CalendarPage({ searchParams }) {
                           height: LANE_H,
                           background: b.conflict
                             ? `repeating-linear-gradient(135deg, ${color} 0 8px, #B4382F 8px 12px)`
+                            : blk
+                            ? `repeating-linear-gradient(135deg, ${color} 0 6px, #B9C0BC 6px 12px)`
                             : color,
                         }}
                       >
-                        <span dir="auto" className="truncate">{b.guest_name || 'محجوز'}</span>
+                        <span dir="auto" className="truncate">{blk ? b.notes || 'مغلق' : b.guest_name || 'محجوز'}</span>
                       </Link>
                     );
                   })}

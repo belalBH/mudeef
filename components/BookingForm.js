@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from 'react';
 import { saveBooking } from '@/lib/actions';
-import { SOURCES } from '@/lib/constants';
+import { PAYMENT_METHODS, SOURCES } from '@/lib/constants';
 import { nightsLabel } from '@/lib/dates';
+import { quote } from '@/lib/pricing';
 import { Alert, Submit, useFormAction } from './ui';
 
 function nightsBetween(a, b) {
@@ -11,39 +12,30 @@ function nightsBetween(a, b) {
   return Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
 }
 
-function suggestPrice(unit, a, b) {
-  if (!unit || !a || !b) return 0;
-  let total = 0;
-  const d = new Date(a + 'T00:00:00Z');
-  const end = new Date(b + 'T00:00:00Z');
-  while (d < end) {
-    const wd = d.getUTCDay();
-    total += (wd === 4 || wd === 5) && unit.weekend_price ? unit.weekend_price : unit.base_price;
-    d.setUTCDate(d.getUTCDate() + 1);
-  }
-  return total;
-}
-
-export default function BookingForm({ booking, units, defaults = {} }) {
+export default function BookingForm({ booking, units, rates = [], guests = [], defaults = {} }) {
   const [state, onSubmit, busy] = useFormAction(saveBooking);
   const b = booking || {};
   const v = state?.values || {};
+  const block = (b.source || defaults.source) === 'block';
   const [unitId, setUnitId] = useState(String(b.unit_id || defaults.unit || units[0]?.id || ''));
   const [checkIn, setCheckIn] = useState(b.check_in || defaults.check_in || '');
   const [checkOut, setCheckOut] = useState(b.check_out || defaults.check_out || '');
   const [total, setTotal] = useState(b.total_amount ? String(b.total_amount) : '');
   const [source, setSource] = useState(b.source || 'direct');
-  const [status, setStatus] = useState(b.status || 'confirmed');
+  const [guestName, setGuestName] = useState(b.guest_name || '');
+  const [guestPhone, setGuestPhone] = useState(b.guest_phone || '');
   const unit = units.find((u) => String(u.id) === unitId);
   const nights = nightsBetween(checkIn, checkOut);
-  const suggested = useMemo(() => suggestPrice(unit, checkIn, checkOut), [unit, checkIn, checkOut]);
+  const q = useMemo(() => quote(unit, checkIn, checkOut, rates), [unit, checkIn, checkOut, rates]);
+  const known = guests.find((g) => g.name === guestName);
 
   return (
     <form onSubmit={onSubmit} className="space-y-6">
       {b.id && <input type="hidden" name="id" value={b.id} />}
+      {block && <input type="hidden" name="source" value="block" />}
 
       <fieldset className="grid gap-4 sm:grid-cols-2">
-        <legend className="mb-3 font-semibold">الإقامة</legend>
+        <legend className="mb-3 font-semibold">{block ? 'فترة الإغلاق' : 'الإقامة'}</legend>
         <div className="sm:col-span-2">
           <label className="label" htmlFor="unit_id">الوحدة</label>
           <select id="unit_id" name="unit_id" className="field" value={unitId} onChange={(e) => setUnitId(e.target.value)} required>
@@ -53,73 +45,119 @@ export default function BookingForm({ booking, units, defaults = {} }) {
           </select>
         </div>
         <div>
-          <label className="label" htmlFor="check_in">تاريخ الدخول</label>
+          <label className="label" htmlFor="check_in">{block ? 'من تاريخ' : 'تاريخ الدخول'}</label>
           <input id="check_in" name="check_in" type="date" className="field" value={checkIn} onChange={(e) => setCheckIn(e.target.value)} required />
         </div>
         <div>
-          <label className="label" htmlFor="check_out">تاريخ الخروج</label>
+          <label className="label" htmlFor="check_out">{block ? 'إلى تاريخ (يوم الفتح)' : 'تاريخ الخروج'}</label>
           <input id="check_out" name="check_out" type="date" className="field" min={checkIn || undefined} value={checkOut} onChange={(e) => setCheckOut(e.target.value)} required />
-          <p className="hint">{nights > 0 ? nightsLabel(nights) : 'اختر تاريخ خروج بعد تاريخ الدخول'}</p>
+          <p className="hint">
+            {nights > 0 ? nightsLabel(nights) : 'اختر تاريخاً بعد تاريخ البداية'}
+            {!block && q.minNights > nights && nights > 0 && (
+              <span className="block text-saffron">موسم {q.seasons.join('، ')} يشترط {q.minNights} ليالٍ على الأقل.</span>
+            )}
+          </p>
         </div>
-        <div>
-          <label className="label" htmlFor="source">مصدر الحجز</label>
-          <select id="source" name="source" className="field" value={source} onChange={(e) => setSource(e.target.value)}>
-            {Object.entries(SOURCES).map(([k, v]) => (
-              <option key={k} value={k}>{v.label}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="label" htmlFor="status">الحالة</label>
-          <select id="status" name="status" className="field" value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="confirmed">مؤكد</option>
-            <option value="cancelled">ملغي</option>
-          </select>
-        </div>
+        {!block && (
+          <div>
+            <label className="label" htmlFor="source">مصدر الحجز</label>
+            <select id="source" name="source" className="field" value={source} onChange={(e) => setSource(e.target.value)}>
+              {Object.entries(SOURCES).map(([k, s]) => (
+                <option key={k} value={k}>{s.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </fieldset>
 
-      <fieldset className="grid gap-4 border-t border-line pt-5 sm:grid-cols-2">
-        <legend className="sr-only">الضيف</legend>
-        <h3 className="font-semibold sm:col-span-2">الضيف</h3>
-        <div>
-          <label className="label" htmlFor="guest_name">الاسم</label>
-          <input id="guest_name" name="guest_name" className="field" defaultValue={v.guest_name ?? b.guest_name ?? ''} />
-        </div>
-        <div>
-          <label className="label" htmlFor="guest_phone">الجوال</label>
-          <input id="guest_phone" name="guest_phone" type="tel" dir="ltr" className="field text-start" placeholder="05xxxxxxxx" defaultValue={v.guest_phone ?? b.guest_phone ?? ''} />
-        </div>
-        <div>
-          <label className="label" htmlFor="guests">عدد الضيوف</label>
-          <input id="guests" name="guests" type="number" min="1" className="field" defaultValue={v.guests || b.guests || 1} />
-        </div>
-      </fieldset>
+      {!block && (
+        <>
+          <fieldset className="grid gap-4 border-t border-line pt-5 sm:grid-cols-2">
+            <legend className="sr-only">الضيف</legend>
+            <h3 className="font-semibold sm:col-span-2">الضيف</h3>
+            <div>
+              <label className="label" htmlFor="guest_name">الاسم</label>
+              <input
+                id="guest_name"
+                name="guest_name"
+                className="field"
+                list="guest-list"
+                autoComplete="off"
+                value={guestName}
+                onChange={(e) => {
+                  setGuestName(e.target.value);
+                  const g = guests.find((x) => x.name === e.target.value);
+                  if (g?.phone) setGuestPhone(g.phone);
+                }}
+              />
+              <datalist id="guest-list">
+                {guests.map((g) => (
+                  <option key={g.id} value={g.name}>{g.phone || ''}</option>
+                ))}
+              </datalist>
+              {known && <p className="hint text-palm">ضيف سابق{known.stays ? `، ${known.stays} إقامات` : ''}{known.blacklisted ? '، في قائمة الحظر' : ''}</p>}
+            </div>
+            <div>
+              <label className="label" htmlFor="guest_phone">الجوال</label>
+              <input id="guest_phone" name="guest_phone" type="tel" dir="ltr" className="field text-start" placeholder="05xxxxxxxx" value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} />
+            </div>
+            <div>
+              <label className="label" htmlFor="guests">عدد الضيوف</label>
+              <input id="guests" name="guests" type="number" min="1" className="field" defaultValue={v.guests || b.guests || 1} />
+              {unit && <p className="hint">الوحدة تتسع لـ {unit.capacity}</p>}
+            </div>
+          </fieldset>
 
-      <fieldset className="grid gap-4 border-t border-line pt-5 sm:grid-cols-3">
-        <legend className="sr-only">المبالغ</legend>
-        <h3 className="font-semibold sm:col-span-3">المبالغ</h3>
-        <div>
-          <label className="label" htmlFor="total_amount">إجمالي الحجز (ر.س)</label>
-          <input id="total_amount" name="total_amount" type="number" min="0" step="0.01" className="field" value={total} onChange={(e) => setTotal(e.target.value)} />
-          {suggested > 0 && String(suggested) !== total && (
-            <button type="button" className="hint text-palm underline underline-offset-2" onClick={() => setTotal(String(suggested))}>
-              استخدم سعر الوحدة: {suggested.toLocaleString('en-US')} ر.س
-            </button>
-          )}
-        </div>
-        <div>
-          <label className="label" htmlFor="commission">عمولة المنصة</label>
-          <input id="commission" name="commission" type="number" min="0" step="0.01" className="field" defaultValue={v.commission ?? (b.id ? b.commission : '')} placeholder="تُحسب تلقائياً" />
-        </div>
-        <div>
-          <label className="label" htmlFor="paid_amount">المدفوع</label>
-          <input id="paid_amount" name="paid_amount" type="number" min="0" step="0.01" className="field" defaultValue={v.paid_amount ?? (b.paid_amount || '')} />
-        </div>
-        <div className="sm:col-span-3">
-          <label className="label" htmlFor="notes">ملاحظات</label>
-          <textarea id="notes" name="notes" rows={3} className="field" defaultValue={v.notes ?? b.notes ?? ''} />
-        </div>
-      </fieldset>
+          <fieldset className="grid gap-4 border-t border-line pt-5 sm:grid-cols-2">
+            <legend className="sr-only">المبالغ</legend>
+            <h3 className="font-semibold sm:col-span-2">المبالغ</h3>
+            <div>
+              <label className="label" htmlFor="total_amount">إجمالي الحجز (ر.س)</label>
+              <input id="total_amount" name="total_amount" type="number" min="0" step="0.01" className="field" value={total} onChange={(e) => setTotal(e.target.value)} />
+              {q.total > 0 && String(q.total) !== total && (
+                <button type="button" className="hint text-start text-palm underline underline-offset-2" onClick={() => setTotal(String(q.total))}>
+                  استخدم السعر المحسوب: {q.total.toLocaleString('en-US')} ر.س
+                  {q.seasons.length > 0 && ` (يشمل ${q.seasons.join('، ')})`}
+                </button>
+              )}
+            </div>
+            <div>
+              <label className="label" htmlFor="commission">عمولة المنصة (ر.س)</label>
+              <input
+                id="commission"
+                name="commission"
+                type="number"
+                min="0"
+                step="0.01"
+                className="field"
+                defaultValue={v.commission ?? (b.id ? b.commission : '')}
+                placeholder={source === 'direct' ? 'لا توجد عمولة' : 'تُحسب من نسبة المنصة'}
+              />
+            </div>
+            {!b.id && (
+              <>
+                <div>
+                  <label className="label" htmlFor="deposit">مدفوع الآن (عربون)</label>
+                  <input id="deposit" name="deposit" type="number" min="0" step="0.01" className="field" defaultValue={v.deposit || ''} />
+                </div>
+                <div>
+                  <label className="label" htmlFor="deposit_method">طريقة الدفع</label>
+                  <select id="deposit_method" name="deposit_method" className="field" defaultValue={v.deposit_method || (source === 'direct' ? 'cash' : 'platform')} key={source}>
+                    {Object.entries(PAYMENT_METHODS).map(([k, l]) => (
+                      <option key={k} value={k}>{l}</option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
+          </fieldset>
+        </>
+      )}
+
+      <div className="border-t border-line pt-5">
+        <label className="label" htmlFor="notes">{block ? 'السبب' : 'ملاحظات'}</label>
+        <textarea id="notes" name="notes" rows={3} className="field" defaultValue={v.notes ?? b.notes ?? ''} placeholder={block ? 'صيانة، استخدام شخصي، تجديد…' : ''} />
+      </div>
 
       <Alert state={state} />
       {state?.clash && (
@@ -128,7 +166,13 @@ export default function BookingForm({ booking, units, defaults = {} }) {
           حفظ رغم التعارض (سيظهر الحجزان كتعارض حتى تحله)
         </label>
       )}
-      <Submit busy={busy}>{b.id ? 'حفظ التعديلات' : 'تسجيل الحجز'}</Submit>
+      {state?.blacklisted && (
+        <label className="flex items-center gap-2 text-sm text-danger">
+          <input type="checkbox" name="force_guest" className="h-4 w-4 accent-danger" />
+          تجاهل الحظر وسجّل الحجز
+        </label>
+      )}
+      <Submit busy={busy}>{block ? (b.id ? 'حفظ الإغلاق' : 'إغلاق التواريخ') : b.id ? 'حفظ التعديلات' : 'تسجيل الحجز'}</Submit>
     </form>
   );
 }
