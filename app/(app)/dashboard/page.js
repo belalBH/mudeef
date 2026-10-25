@@ -6,6 +6,8 @@ import { toggleTask } from '@/lib/actions-more';
 import { addDays, diffDays, monthShort, nightsLabel, prettyDate, weekday } from '@/lib/dates';
 import { money, num, sourceColor, sourceLabel } from '@/lib/constants';
 import { SourceTag } from '@/components/badges';
+import { dueInstallments, pendingRequests, reviewStats, runRecurring } from '@/lib/queries-v3';
+import { ConfirmRequestButton } from '@/components/forms-v3';
 
 export const metadata = { title: 'اليوم | مُضيف' };
 
@@ -54,7 +56,11 @@ function StayButton({ id, to, label, early, primary }) {
 
 export default async function DashboardPage() {
   const user = await requireUser();
+  runRecurring(user.account_id);
   const d = dashboard(user.account_id);
+  const requests = pendingRequests(user.account_id);
+  const installments = dueInstallments(user.account_id);
+  const reviews = reviewStats(user.account_id);
 
   if (d.units === 0) {
     return (
@@ -152,6 +158,26 @@ export default async function DashboardPage() {
               </ul>
             </div>
           )}
+        </section>
+      )}
+
+      {requests.length > 0 && (
+        <section className="mb-8 rounded-lg border border-palm/30 bg-palm-soft p-4" aria-label="طلبات الحجز">
+          <div className="mb-3 flex items-center justify-between">
+            <h2>طلبات حجز جديدة ({requests.length})</h2>
+            <Link href="/requests" className="text-sm text-palm hover:underline">كل الطلبات</Link>
+          </div>
+          <ul className="space-y-2">
+            {requests.slice(0, 4).map((b) => (
+              <li key={b.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-white px-3 py-2">
+                <Link href={`/bookings/${b.id}`} className="hover:text-palm">
+                  <span className="font-semibold" dir="auto">{b.guest_name}</span>
+                  <span className="text-sm text-muted">، {b.unit_name}، {prettyDate(b.check_in)} إلى {prettyDate(b.check_out)}، {money(b.total_amount)}</span>
+                </Link>
+                <ConfirmRequestButton id={b.id} />
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 
@@ -330,6 +356,28 @@ export default async function DashboardPage() {
             )}
           </section>
 
+          {installments.length > 0 && (
+            <section>
+              <h2 className="mb-3">أقساط مستحقة</h2>
+              <ul className="panel divide-y divide-line">
+                {installments.slice(0, 6).map((i) => (
+                  <li key={i.id}>
+                    <Link href={`/bookings/${i.booking_id}`} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm hover:bg-paper/60">
+                      <span>
+                        <span className="font-semibold" dir="auto">{i.booking.guest_name || 'ضيف'}</span>
+                        <span className="block text-muted">{i.booking.unit_name}، {i.note || 'دفعة'}، {label(i.due_on)}</span>
+                      </span>
+                      <span className={`font-semibold ${i.state === 'late' ? 'text-danger' : 'text-saffron'}`}>
+                        {money(i.left)}
+                        {i.state === 'late' && <span className="block text-xs font-normal">متأخرة</span>}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           <section>
             <div className="mb-3 flex items-end justify-between">
               <h2>مبالغ لم تُحصّل</h2>
@@ -397,6 +445,27 @@ export default async function DashboardPage() {
                   <li key={k} className="flex justify-between">
                     <SourceTag source={k} />
                     <span>{money(v)} <span className="text-muted">({pct(v / srcTotal)})</span></span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {reviews.n > 0 && (
+            <section>
+              <h2 className="mb-3">تقييمات الضيوف</h2>
+              <p className="mb-3">
+                <span className="text-3xl font-bold">{reviews.avg.toFixed(1)}</span>
+                <span className="text-saffron"> ★</span>
+                <span className="text-sm text-muted"> من {num(reviews.n)} تقييم{reviews.clean ? `، النظافة ${reviews.clean.toFixed(1)}` : ''}</span>
+              </p>
+              <ul className="space-y-2 text-sm">
+                {reviews.latest.slice(0, 3).map((r) => (
+                  <li key={r.id} className="panel px-3 py-2">
+                    <span className="text-saffron">{'★'.repeat(r.rating)}</span>{' '}
+                    <Link href={`/bookings/${r.booking_id}`} className="font-semibold hover:text-palm" dir="auto">{r.guest_name}</Link>
+                    <span className="text-muted">، {r.unit_name}</span>
+                    {r.comment && <p className="mt-1 text-muted">"{r.comment}"</p>}
                   </li>
                 ))}
               </ul>

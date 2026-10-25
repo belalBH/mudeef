@@ -2,6 +2,9 @@ import Link from 'next/link';
 import { requireUser } from '@/lib/auth';
 import { listExpenses, listUnits } from '@/lib/queries';
 import { deleteExpense } from '@/lib/actions-more';
+import { listRecurring, runRecurring } from '@/lib/queries-v3';
+import { deleteRecurring, toggleRecurring } from '@/lib/actions-v3';
+import { RecurringForm } from '@/components/forms-v3';
 import { addMonths, monthName, prettyDate, todayISO } from '@/lib/dates';
 import { EXPENSE_CATEGORIES, money } from '@/lib/constants';
 import PageHead from '@/components/PageHead';
@@ -15,7 +18,9 @@ export default async function ExpensesPage({ searchParams }) {
   const sp = await searchParams;
   const today = todayISO();
   const ym = /^\d{4}-\d{2}$/.test(sp.m || '') ? sp.m : today.slice(0, 7);
+  runRecurring(user.account_id);
   const units = listUnits(user.account_id);
+  const recurring = listRecurring(user.account_id);
   const rows = listExpenses(user.account_id, ym);
   const total = rows.reduce((a, e) => a + e.amount, 0);
   const byCat = {};
@@ -31,6 +36,39 @@ export default async function ExpensesPage({ searchParams }) {
       <section className="panel mb-8 p-5">
         <h2 className="mb-4">مصروف جديد</h2>
         <ExpenseForm units={units} today={today} />
+      </section>
+
+      <section className="mb-8">
+        <details className="panel p-5">
+          <summary className="cursor-pointer font-semibold text-palm">
+            المصاريف الشهرية الثابتة {recurring.length > 0 && <span className="text-muted">({recurring.filter((r) => r.active).length} فعّالة)</span>}
+          </summary>
+          <p className="mb-4 mt-2 text-sm text-muted">إيجار، إنترنت، رواتب… تُسجَّل تلقائياً كل شهر في يومها بدون ما تدخلها يدوياً.</p>
+          {recurring.length > 0 && (
+            <ul className="mb-5 divide-y divide-line rounded-md ring-1 ring-line">
+              {recurring.map((r) => (
+                <li key={r.id} className={`flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-sm ${r.active ? '' : 'opacity-50'}`}>
+                  <span>
+                    <strong>{money(r.amount)}</strong> {EXPENSE_CATEGORIES[r.category]}
+                    {r.note && <span className="text-muted">، {r.note}</span>}
+                    <span className="text-muted">، {r.unit_name || 'عام'}، يوم {r.day_of_month} من كل شهر</span>
+                  </span>
+                  <span className="flex gap-3">
+                    <form action={toggleRecurring}>
+                      <input type="hidden" name="id" value={r.id} />
+                      <button className="text-xs text-palm hover:underline">{r.active ? 'إيقاف' : 'تشغيل'}</button>
+                    </form>
+                    <form action={deleteRecurring}>
+                      <input type="hidden" name="id" value={r.id} />
+                      <ConfirmButton className="text-xs text-danger hover:underline" message="حذف المصروف الشهري؟ المصاريف المسجلة سابقاً تبقى.">حذف</ConfirmButton>
+                    </form>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <RecurringForm units={units} />
+        </details>
       </section>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">

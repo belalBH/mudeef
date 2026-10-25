@@ -19,6 +19,7 @@ const r2 = (n) => Math.round((n || 0) * 100) / 100;
 export async function GET(req, { params }) {
   const user = await getUser();
   if (!user) return new Response('Unauthorized', { status: 401 });
+  if (user.role === 'cleaner') return new Response('Forbidden', { status: 403 });
   const { kind } = await params;
   const sp = new URL(req.url).searchParams;
   let rows;

@@ -22,6 +22,11 @@ if (!cols.includes('stay_status')) {
 const email = 'demo@mudeef.sa';
 const old = db.prepare('SELECT account_id FROM users WHERE email = ?').get(email);
 if (old) db.prepare('DELETE FROM accounts WHERE id = ?').run(old.account_id);
+db.prepare("DELETE FROM users WHERE email IN ('cleaner@mudeef.sa', 'manager@mudeef.sa')").run();
+if (!db.prepare('PRAGMA table_info(owners)').all().length) {
+  console.error('Database is on an older version. Start the app once so it upgrades, then run the seed.');
+  process.exit(1);
+}
 
 const tok = () => crypto.randomBytes(18).toString('base64url');
 const iso = (d) => d.toISOString().slice(0, 10);
@@ -36,21 +41,40 @@ const day = (n) => {
 
 const seed = db.transaction(() => {
   const acc = db
-    .prepare(`INSERT INTO accounts (name, phone, address, checkin_time, checkout_time, invoice_note, cleaning_fee) VALUES (?,?,?,?,?,?,?)`)
-    .run('استوديوهات الروضة', '0550000000', 'جدة، حي الروضة', '15:00', '12:00', 'الإلغاء مجاني قبل 48 ساعة من الوصول. شكراً لإقامتكم.', 60)
+    .prepare(`INSERT INTO accounts (name, phone, address, checkin_time, checkout_time, invoice_note, cleaning_fee, slug, booking_enabled, booking_intro) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    .run(
+      'استوديوهات الروضة', '0550000000', 'جدة، حي الروضة', '15:00', '12:00', 'الإلغاء مجاني قبل 48 ساعة من الوصول. شكراً لإقامتكم.', 60,
+      db.prepare("SELECT 1 FROM accounts WHERE slug = 'rawda'").get() ? null : 'rawda', 1,
+      'استوديوهات وشقق مفروشة بالكامل في حي الروضة بجدة، دخول ذاتي وقريبة من الخدمات. احجز مباشرة بأفضل سعر.'
+    )
     .lastInsertRowid;
-  db.prepare('INSERT INTO users (account_id, name, email, password_hash) VALUES (?,?,?,?)').run(acc, 'بلال', email, bcrypt.hashSync('demo1234', 10));
+  const hash = bcrypt.hashSync('demo1234', 10);
+  db.prepare('INSERT INTO users (account_id, name, email, password_hash, role) VALUES (?,?,?,?,?)').run(acc, 'بلال', email, hash, 'owner');
+  db.prepare('INSERT INTO users (account_id, name, email, password_hash, role, phone) VALUES (?,?,?,?,?,?)').run(acc, 'أم سالم', 'cleaner@mudeef.sa', hash, 'cleaner', '0559000001');
+  db.prepare('INSERT INTO users (account_id, name, email, password_hash, role) VALUES (?,?,?,?,?)').run(acc, 'سعد المدير', 'manager@mudeef.sa', hash, 'manager');
+  const ownerId = Number(
+    db.prepare('INSERT INTO owners (account_id, name, phone, iban, fee_pct, notes) VALUES (?,?,?,?,?,?)').run(
+      acc, 'أبو فيصل', '0551112233', 'SA4420000001234567891234', 20, 'يملك شقة الزهراء'
+    ).lastInsertRowid
+  );
 
   const units = [
     ['استوديو 1', 'studio', 'جدة - الروضة', 2, 280, 350, 'الدور الثاني، شقة 4. رمز القفل يُرسل يوم الوصول. الواي فاي: Rawda-1'],
     ['استوديو 2', 'studio', 'جدة - الروضة', 2, 280, 350, 'الدور الثاني، شقة 5. الواي فاي: Rawda-2'],
     ['غرفة عائلية', 'room', 'جدة - الروضة', 4, 380, 450, 'الدور الأول، المدخل الجانبي.'],
     ['شقة غرفتين', 'apartment', 'جدة - الزهراء', 5, 520, 650, 'عمارة 12، الدور الثالث. موقف خاص رقم 7.'],
-  ].map(([name, type, city, cap, p, wp, info]) =>
+  ].map(([name, type, city, cap, p, wp, info], i) =>
     Number(
       db.prepare(
-        'INSERT INTO units (account_id,name,type,city,capacity,base_price,weekend_price,checkin_info,export_token) VALUES (?,?,?,?,?,?,?,?,?)'
-      ).run(acc, name, type, city, cap, p, wp, info, tok()).lastInsertRowid
+        `INSERT INTO units (account_id,name,type,city,capacity,base_price,weekend_price,checkin_info,export_token,description,amenities,house_rules,wifi_name,wifi_password,map_url,bedrooms,owner_id)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+      ).run(
+        acc, name, type, city, cap, p, wp, info, tok(),
+        ['استوديو هادئ بسرير كوين ومطبخ صغير وجلسة عمل، مناسب للأزواج ورحلات العمل.', 'استوديو مطل على الشارع بإضاءة طبيعية، سرير كوين ومطبخ مجهز.', 'غرفة واسعة بسريرين مزدوجين، مناسبة للعوائل الصغيرة.', 'شقة بغرفتي نوم وصالة ومطبخ كامل وموقف خاص، مثالية للعوائل.'][i],
+        ['واي فاي، مطبخ، دخول ذاتي، مكيف، تلفزيون ذكي', 'واي فاي، مطبخ، دخول ذاتي، مكيف', 'واي فاي، ثلاجة، مكيف، سريران', 'واي فاي، مطبخ كامل، غسالة، موقف سيارة، دخول ذاتي'][i],
+        'ممنوع التدخين داخل الوحدة. الهدوء بعد 11 مساءً. الحفلات غير مسموحة.',
+        `Rawda-${i + 1}`, `rawda${2026 + i}`, 'https://maps.app.goo.gl/example', [0, 0, 1, 2][i], i === 3 ? ownerId : null
+      ).lastInsertRowid
     )
   );
 
@@ -110,6 +134,51 @@ const seed = db.transaction(() => {
   // One overlapping stay so the double-booking warning is visible
   const extra = Number(ins.run(acc, units[0], 'booking', null, 'Liam Walker', null, 2, day(2), day(4), 600, 90, 'upcoming').lastInsertRowid);
   task.run(acc, units[0], extra, day(4), 'open', null, null);
+  // A monthly tenant with an installment plan
+  const monthly = Number(
+    ins.run(acc, units[1], 'direct', guestIds[3], people[3][0], people[3][1], 1, day(60), day(150), 21600, 0, 'upcoming').lastInsertRowid
+  );
+  pay.run(acc, monthly, 7200, 'transfer', TODAY, 'الدفعة الأولى مقدماً');
+  task.run(acc, units[1], monthly, day(150), 'open', null, null);
+  for (let i = 0; i < 3; i++)
+    db.prepare('INSERT INTO installments (account_id, booking_id, due_on, amount, note) VALUES (?,?,?,?,?)').run(acc, monthly, day(60 + i * 30), 7200, `دفعة ${i + 1} من 3`);
+  db.prepare(`UPDATE bookings SET security_deposit = 1000, deposit_status = 'held' WHERE id = ?`).run(monthly);
+  // Requests waiting from the direct booking page
+  ins.run(acc, units[2], 'direct', guestIds[6], people[6][0], people[6][1], 3, day(50), day(53), 1270, 0, 'upcoming');
+  db.prepare(`UPDATE bookings SET status = 'pending', request_note = 'بنوصل متأخر حوالي الساعة 11 بالليل' WHERE id = last_insert_rowid()`).run();
+  ins.run(acc, units[0], 'direct', null, 'Sara Ahmed', '0567778899', 2, day(47), day(50), 900, 0, 'upcoming');
+  db.prepare(`UPDATE bookings SET status = 'pending' WHERE id = last_insert_rowid()`).run();
+  // Extra charges and a discount on a few stays
+  const sample = db.prepare(`SELECT id FROM bookings WHERE account_id = ? AND source = 'direct' AND status = 'confirmed' AND check_out < ? ORDER BY id DESC LIMIT 3`).all(acc, TODAY);
+  for (const [i, b] of sample.entries()) {
+    const [kind, label, amt] = [['fee', 'رسوم تنظيف', 80], ['extra', 'سرير إضافي', 60], ['discount', 'خصم عميل متكرر', -50]][i];
+    db.prepare('INSERT INTO booking_items (account_id, booking_id, kind, label, amount) VALUES (?,?,?,?,?)').run(acc, b.id, kind, label, amt);
+    db.prepare('UPDATE bookings SET total_amount = total_amount + ? WHERE id = ?').run(amt, b.id);
+    if (amt > 0) pay.run(acc, b.id, amt, 'cash', TODAY, label);
+  }
+  // Reviews from past guests
+  const past = db.prepare(`SELECT id FROM bookings WHERE account_id = ? AND status = 'confirmed' AND check_out < ? AND source != 'block' ORDER BY check_out DESC LIMIT 14`).all(acc, TODAY);
+  const comments = ['المكان نظيف والدخول سهل', 'تجربة ممتازة وسنعود', null, 'المكيف يحتاج صيانة لكن الباقي ممتاز', 'قريب من كل شي', null, 'المضيف متعاون جداً'];
+  for (const [i, b] of past.entries()) {
+    if (i % 2) continue;
+    db.prepare('INSERT INTO reviews (account_id, booking_id, rating, cleanliness, comment) VALUES (?,?,?,?,?)').run(acc, b.id, [5, 5, 4, 5, 3, 4, 5][i % 7], [5, 4, 5, 5, 4, 4, 5][i % 7], comments[i % 7]);
+  }
+  // A registered upcoming guest
+  const reg = db.prepare(`SELECT id, guest_id FROM bookings WHERE account_id = ? AND status = 'confirmed' AND check_in > ? AND guest_id IS NOT NULL ORDER BY check_in LIMIT 1`).get(acc, TODAY);
+  if (reg) {
+    db.prepare(`UPDATE guests SET id_type = 'national', id_number = '1098765432', nationality = 'سعودي' WHERE id = ?`).run(reg.guest_id);
+    db.prepare(`UPDATE bookings SET registered_at = datetime('now'), arrival_time = '16:30' WHERE id = ?`).run(reg.id);
+  }
+  // Recurring monthly costs
+  db.prepare('INSERT INTO recurring_expenses (account_id, unit_id, category, amount, day_of_month, note, last_period) VALUES (?,?,?,?,?,?,?)').run(acc, units[3], 'rent', 3500, 1, 'إيجار الشقة', TODAY.slice(0, 7));
+  db.prepare('INSERT INTO recurring_expenses (account_id, unit_id, category, amount, day_of_month, note, last_period) VALUES (?,?,?,?,?,?,?)').run(acc, null, 'utilities', 300, 5, 'إنترنت الألياف', TODAY.slice(0, 7));
+  db.prepare('INSERT INTO recurring_expenses (account_id, unit_id, category, amount, day_of_month, note, last_period) VALUES (?,?,?,?,?,?,?)').run(acc, null, 'salaries', 2500, 27, 'راتب عاملة النظافة', TODAY.slice(0, 7));
+  // Some history in the activity log
+  const act = db.prepare('INSERT INTO activity (account_id, user_name, action, booking_id, created_at) VALUES (?,?,?,?,?)');
+  act.run(acc, 'سعد المدير', `سجّل دفعة 7200 ر.س (تحويل بنكي) لـ ${people[3][0]}`, monthly, `${TODAY} 09:12:00`);
+  act.run(acc, 'أم سالم', 'أنهت تنظيف غرفة عائلية', null, `${TODAY} 08:40:00`);
+  act.run(acc, 'صفحة الحجز', `طلب حجز جديد من ${people[6][0]}`, null, `${TODAY} 07:05:00`);
+
   // A maintenance block
   db.prepare(`INSERT INTO bookings (account_id, unit_id, source, check_in, check_out, notes) VALUES (?,?,?,?,?,?)`).run(acc, units[2], 'block', day(20), day(23), 'صيانة المكيف');
   db.prepare(`INSERT INTO tasks (account_id, unit_id, type, title, due_on, assignee) VALUES (?,?,?,?,?,?)`).run(acc, units[2], 'maintenance', 'تصليح المكيف', day(20), 'فني التكييف');
@@ -120,7 +189,7 @@ const seed = db.transaction(() => {
   for (const r of db.prepare('SELECT id FROM bookings WHERE account_id = ?').all(acc))
     db.prepare('UPDATE bookings SET paid_amount = COALESCE((SELECT SUM(amount) FROM payments WHERE booking_id = ?),0) WHERE id = ?').run(r.id, r.id);
 
-  const rows = db.prepare(`SELECT id, unit_id, check_in, check_out FROM bookings WHERE account_id = ? AND status != 'cancelled' ORDER BY unit_id, check_in`).all(acc);
+  const rows = db.prepare(`SELECT id, unit_id, check_in, check_out FROM bookings WHERE account_id = ? AND status = 'confirmed' ORDER BY unit_id, check_in`).all(acc);
   for (let i = 0; i < rows.length; i++)
     for (let j = i + 1; j < rows.length && rows[j].unit_id === rows[i].unit_id; j++)
       if (rows[j].check_in < rows[i].check_out) db.prepare('UPDATE bookings SET conflict = 1 WHERE id IN (?, ?)').run(rows[i].id, rows[j].id);

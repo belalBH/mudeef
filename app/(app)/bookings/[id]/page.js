@@ -4,9 +4,15 @@ import { requireUser } from '@/lib/auth';
 import { bookingPayments, bookingTasks, getAccount, getBooking, listGuests, listUnits } from '@/lib/queries';
 import { cancelBooking, deleteBooking, deletePayment, restoreBooking, setStayStatus } from '@/lib/actions';
 import { toggleTask } from '@/lib/actions-more';
+import { deleteInstallment, deleteItem, generateInstallments, rejectRequest } from '@/lib/actions-v3';
+import { activity, bookingItems, bookingReview, installmentSchedule } from '@/lib/queries-v3';
+import { baseUrl } from '@/lib/baseurl';
+import { when } from '@/lib/format';
+import { ConfirmRequestButton, DepositForms, InstallmentForm, ItemForm } from '@/components/forms-v3';
+import { CopyField } from '@/components/ui';
 import { findOverlaps, seasonRates } from '@/lib/bookings';
 import { diffDays, prettyDate, todayISO, weekday, nightsLabel } from '@/lib/dates';
-import { PAYMENT_METHODS, STAY_STATUSES, money, sourceLabel } from '@/lib/constants';
+import { DEPOSIT_STATUSES, ID_TYPES, ITEM_KINDS, PAYMENT_METHODS, STAY_STATUSES, money, sourceLabel } from '@/lib/constants';
 import { fillTemplate, templatesFor, waLink } from '@/lib/templates';
 import BookingForm from '@/components/BookingForm';
 import PaymentForm from '@/components/PaymentForm';
@@ -44,7 +50,15 @@ export default async function BookingPage({ params, searchParams }) {
   const net = b.total_amount - b.commission;
   const due = Math.round((b.total_amount - b.paid_amount) * 100) / 100;
   const cancelled = b.status === 'cancelled';
+  const pending = b.status === 'pending';
+  const live = b.status === 'confirmed';
+  const base = await baseUrl();
+  const guestLink = `${base}/g/${b.guest_token}`;
   const tpls = templatesFor(account);
+  const items = bookingItems(b.id);
+  const schedule = installmentSchedule(b);
+  const review = bookingReview(b.id);
+  const log = activity(user.account_id, { bookingId: b.id, limit: 15 });
   const inStay = b.check_in <= today && b.check_out > today;
 
   const stayBtn = (to, label, cls = 'btn-ghost', extra = null) => (
@@ -62,7 +76,7 @@ export default async function BookingPage({ params, searchParams }) {
       <div className="mb-2 mt-1 flex flex-wrap items-center gap-3">
         <h1>{b.guest_name || 'حجز بدون اسم'}</h1>
         <StatusTag booking={b} />
-        {!cancelled && (
+        {live && (
           <span className="rounded bg-paper px-2 py-0.5 text-xs ring-1 ring-line">{STAY_STATUSES[b.stay_status]}</span>
         )}
         <span className="text-sm text-muted">#{b.id}</span>
@@ -72,6 +86,23 @@ export default async function BookingPage({ params, searchParams }) {
       </p>
 
       {sp.saved && <p className="mb-5 rounded-md bg-palm-soft px-4 py-3 text-sm text-palm-dark">تم حفظ الحجز.</p>}
+      {pending && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-lg border border-saffron/50 bg-saffron-soft p-4">
+          <div>
+            <p className="font-semibold">طلب حجز من صفحة الحجز المباشر ينتظر تأكيدك</p>
+            {b.request_note && <p className="mt-1 text-sm">ملاحظة الضيف: {b.request_note}</p>}
+            <p className="text-sm text-muted">التواريخ غير محجوزة حتى تؤكد الطلب.</p>
+          </div>
+          <div className="flex flex-wrap items-start gap-2">
+            <ConfirmRequestButton id={b.id} />
+            <form action={rejectRequest} className="flex gap-2">
+              <input type="hidden" name="id" value={b.id} />
+              <input name="reason" placeholder="سبب الرفض" aria-label="سبب الرفض" className="field w-36 py-1.5 text-sm" />
+              <button className="btn-ghost px-3 py-1.5 text-sm text-danger">رفض</button>
+            </form>
+          </div>
+        </div>
+      )}
       {b.guest_blacklisted ? (
         <p className="mb-5 rounded-md bg-danger-soft px-4 py-3 text-sm text-danger">
           هذا الضيف في قائمة الحظر{b.guest_notes ? `: ${b.guest_notes}` : ''}.
@@ -101,19 +132,19 @@ export default async function BookingPage({ params, searchParams }) {
 
       {/* Action bar: what can be done with this stay right now */}
       <div className="mb-8 flex flex-wrap gap-2">
-        {!cancelled && b.stay_status === 'upcoming' && b.check_in <= today && stayBtn('checked_in', 'تسجيل دخول الضيف', 'btn-primary')}
-        {!cancelled && b.stay_status === 'upcoming' && b.check_in > today && stayBtn('checked_in', 'تسجيل دخول مبكر')}
-        {!cancelled && b.stay_status === 'checked_in' &&
+        {live && b.stay_status === 'upcoming' && b.check_in <= today && stayBtn('checked_in', 'تسجيل دخول الضيف', 'btn-primary')}
+        {live && b.stay_status === 'upcoming' && b.check_in > today && stayBtn('checked_in', 'تسجيل دخول مبكر')}
+        {live && b.stay_status === 'checked_in' &&
           stayBtn('checked_out', inStay && b.check_out > today ? 'خروج مبكر اليوم' : 'تسجيل خروج الضيف', 'btn-primary', inStay && b.check_out > today ? <input type="hidden" name="early" value="1" /> : null)}
-        {!cancelled && b.stay_status === 'upcoming' && b.check_in <= today && stayBtn('no_show', 'لم يحضر')}
-        {!cancelled && b.stay_status !== 'upcoming' && stayBtn('upcoming', 'تراجع عن الحالة')}
+        {live && b.stay_status === 'upcoming' && b.check_in <= today && stayBtn('no_show', 'لم يحضر')}
+        {live && b.stay_status !== 'upcoming' && stayBtn('upcoming', 'تراجع عن الحالة')}
         <Link href={`/bookings/${b.id}/invoice`} className="btn-ghost">الفاتورة</Link>
         {cancelled ? (
           <form action={restoreBooking}>
             <input type="hidden" name="id" value={b.id} />
             <button className="btn-ghost">استعادة الحجز</button>
           </form>
-        ) : (
+        ) : pending ? null : (
           <details className="relative">
             <summary className="btn-ghost cursor-pointer list-none text-danger">إلغاء الحجز</summary>
             <form action={cancelBooking} className="panel absolute end-0 z-10 mt-2 w-72 space-y-2 p-3 shadow-lg">
@@ -170,6 +201,104 @@ export default async function BookingPage({ params, searchParams }) {
             </div>
           </section>
 
+          {/* Extra charges and discounts */}
+          <section>
+            <h2 className="mb-3">رسوم إضافية وخصومات</h2>
+            <div className="panel">
+              {items.length > 0 && (
+                <ul className="divide-y divide-line">
+                  {items.map((it) => (
+                    <li key={it.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+                      <span>
+                        <span className="me-2 rounded bg-paper px-1.5 text-xs ring-1 ring-line">{ITEM_KINDS[it.kind]}</span>
+                        {it.label}
+                      </span>
+                      <span className="flex items-center gap-3">
+                        <span className={it.amount < 0 ? 'text-palm' : ''}>{money(it.amount)}</span>
+                        <form action={deleteItem}>
+                          <input type="hidden" name="id" value={it.id} />
+                          <ConfirmButton className="text-xs text-danger hover:underline" message="حذف هذا البند وتعديل الإجمالي؟">حذف</ConfirmButton>
+                        </form>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="border-t border-line p-4 first:border-t-0">
+                <ItemForm bookingId={b.id} />
+                <p className="hint mt-2">يتعدل إجمالي الحجز تلقائياً، ويظهر كل بند في الفاتورة.</p>
+              </div>
+            </div>
+          </section>
+
+          {/* Security deposit */}
+          <section>
+            <div className="mb-3 flex items-end justify-between">
+              <h2>مبلغ التأمين</h2>
+              {b.deposit_status !== 'none' && (
+                <p className="text-sm">
+                  {money(b.security_deposit)}، {DEPOSIT_STATUSES[b.deposit_status]}
+                  {b.deposit_status === 'partial' && ` (أُرجع ${money(b.deposit_refunded)})`}
+                </p>
+              )}
+            </div>
+            <div className="panel p-4">
+              {['refunded', 'partial'].includes(b.deposit_status) ? (
+                <p className="text-sm text-muted">تمت تسوية التأمين.{b.deposit_status === 'partial' && ' المبلغ المخصوم أُضيف كبند أضرار ودفعة على الحجز.'}</p>
+              ) : (
+                <DepositForms booking={b} />
+              )}
+              <p className="hint mt-2">التأمين لا يدخل في الإيرادات. عند الإرجاع، أي مبلغ تخصمه يُضاف للحجز كأضرار.</p>
+            </div>
+          </section>
+
+          {/* Installments */}
+          <section>
+            <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+              <h2>جدول الدفعات</h2>
+              {b.total_amount > 0 && (
+                <form action={generateInstallments}>
+                  <input type="hidden" name="booking_id" value={b.id} />
+                  <ConfirmButton className="text-sm text-palm hover:underline" message={schedule.length ? 'استبدال الجدول الحالي بجدول شهري جديد؟' : 'إنشاء جدول دفعات شهرية من إجمالي الحجز؟'}>
+                    {schedule.length ? 'إعادة إنشاء جدول شهري' : `تقسيم على ${Math.max(1, Math.ceil(nights / 30))} دفعات شهرية`}
+                  </ConfirmButton>
+                </form>
+              )}
+            </div>
+            <div className="panel">
+              {schedule.length === 0 ? (
+                <p className="p-4 text-sm text-muted">مفيد للإقامات الشهرية الطويلة: قسّم المبلغ على دفعات وتابع المتأخر منها في لوحة اليوم.</p>
+              ) : (
+                <table className="table">
+                  <thead><tr><th>الاستحقاق</th><th>المبلغ</th><th>الحالة</th><th>ملاحظة</th><th /></tr></thead>
+                  <tbody>
+                    {schedule.map((i) => (
+                      <tr key={i.id}>
+                        <td>{prettyDate(i.due_on)} {i.due_on.slice(0, 4)}</td>
+                        <td>{money(i.amount)}</td>
+                        <td className={{ paid: 'text-palm', late: 'font-semibold text-danger', due: 'text-saffron', upcoming: 'text-muted' }[i.state]}>
+                          {{ paid: 'مدفوعة', late: 'متأخرة', due: 'مستحقة اليوم', upcoming: 'قادمة' }[i.state]}
+                          {i.state !== 'paid' && i.paid > 0 && ` (دُفع ${money(i.paid)})`}
+                        </td>
+                        <td className="text-muted">{i.note}</td>
+                        <td className="text-end">
+                          <form action={deleteInstallment}>
+                            <input type="hidden" name="id" value={i.id} />
+                            <button className="text-xs text-danger hover:underline">حذف</button>
+                          </form>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <details className="border-t border-line p-4">
+                <summary className="cursor-pointer text-sm font-semibold text-palm">إضافة دفعة للجدول يدوياً</summary>
+                <div className="mt-3"><InstallmentForm bookingId={b.id} /></div>
+              </details>
+            </div>
+          </section>
+
           {/* Edit */}
           <section>
             <h2 className="mb-3">تعديل الحجز</h2>
@@ -197,12 +326,52 @@ export default async function BookingPage({ params, searchParams }) {
             {b.checked_out_at && <Row k="وقت الخروج" v={b.checked_out_at.slice(0, 16)} />}
           </dl>
 
+          <section className="panel p-4">
+            <h3 className="mb-2 text-sm font-semibold">صفحة الضيف</h3>
+            <p className="mb-3 text-xs text-muted">رابط خاص بهذا الحجز: يشوف منه الضيف تفاصيل حجزه وتعليمات الدخول، ويسجل بياناته، ويقيّم بعد المغادرة.</p>
+            <CopyField value={guestLink} />
+            <div className="mt-2 flex gap-3 text-sm">
+              <a href={guestLink} target="_blank" rel="noreferrer" className="text-palm hover:underline">فتح</a>
+              {b.guest_phone && (
+                <a href={waLink(b.guest_phone, `أهلاً ${b.guest_name || ''}، هذي صفحة حجزك فيها كل التفاصيل وتسجيل البيانات:\n${guestLink}`)} target="_blank" rel="noreferrer" className="text-palm hover:underline">
+                  إرسال للضيف بالواتساب
+                </a>
+              )}
+            </div>
+          </section>
+
+          {(b.registered_at || b.arrival_time) && (
+            <section className="panel p-4 text-sm">
+              <h3 className="mb-2 font-semibold">بيانات النزيل</h3>
+              {b.registered_at ? (
+                <dl className="space-y-1">
+                  <div className="flex justify-between"><dt className="text-muted">الهوية</dt><dd>{ID_TYPES[b.id_type] || '—'}</dd></div>
+                  <div className="flex justify-between"><dt className="text-muted">الرقم</dt><dd dir="ltr">{b.id_number}</dd></div>
+                  {b.nationality && <div className="flex justify-between"><dt className="text-muted">الجنسية</dt><dd>{b.nationality}</dd></div>}
+                  {b.birth_date && <div className="flex justify-between"><dt className="text-muted">الميلاد</dt><dd>{b.birth_date}</dd></div>}
+                  {b.arrival_time && <div className="flex justify-between"><dt className="text-muted">الوصول المتوقع</dt><dd>{b.arrival_time}</dd></div>}
+                  {b.companions && <div><dt className="text-muted">المرافقون</dt><dd className="whitespace-pre-line">{b.companions}</dd></div>}
+                </dl>
+              ) : null}
+              <p className="mt-2 text-xs text-muted">سجّلها الضيف {when(b.registered_at)}</p>
+            </section>
+          )}
+
+          {review && (
+            <section className="panel p-4 text-sm">
+              <h3 className="mb-1 font-semibold">تقييم الضيف</h3>
+              <p className="text-lg text-saffron" aria-label={`${review.rating} من 5`}>{'★'.repeat(review.rating)}<span className="text-line">{'★'.repeat(5 - review.rating)}</span></p>
+              {review.cleanliness && <p className="text-muted">النظافة {review.cleanliness} من 5</p>}
+              {review.comment && <p className="mt-1">"{review.comment}"</p>}
+            </section>
+          )}
+
           {b.guest_phone && (
             <section className="panel p-4">
               <h3 className="mb-3 text-sm font-semibold">رسائل واتساب جاهزة</h3>
               <div className="flex flex-col gap-2">
                 {Object.entries(tpls).map(([k, t]) => (
-                  <a key={k} className="btn-ghost justify-start" href={waLink(b.guest_phone, fillTemplate(t.text, b, account))} target="_blank" rel="noreferrer">
+                  <a key={k} className="btn-ghost justify-start" href={waLink(b.guest_phone, fillTemplate(t.text, b, account, { guestLink }))} target="_blank" rel="noreferrer">
                     {t.label}
                   </a>
                 ))}
@@ -228,6 +397,20 @@ export default async function BookingPage({ params, searchParams }) {
                   </li>
                 ))}
               </ul>
+            </section>
+          )}
+
+          {log.length > 0 && (
+            <section className="panel p-4">
+              <h3 className="mb-2 text-sm font-semibold">سجل الحجز</h3>
+              <ol className="space-y-1.5 text-xs">
+                {log.map((a) => (
+                  <li key={a.id}>
+                    <span className="font-semibold">{a.user_name || 'النظام'}</span> {a.action}
+                    <span className="block text-muted">{when(a.created_at)}</span>
+                  </li>
+                ))}
+              </ol>
             </section>
           )}
 

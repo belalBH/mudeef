@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth';
 import { bookingPayments, getAccount, getBooking } from '@/lib/queries';
+import { bookingItems } from '@/lib/queries-v3';
 import { diffDays, nightsLabel, prettyDate, todayISO } from '@/lib/dates';
 import { PAYMENT_METHODS, money, sourceLabel } from '@/lib/constants';
 import PrintButton from '@/components/PrintButton';
@@ -18,6 +19,8 @@ export default async function InvoicePage({ params }) {
   const acc = getAccount(user.account_id);
   const payments = bookingPayments(user.account_id, b.id);
   const nights = diffDays(b.check_in, b.check_out);
+  const items = bookingItems(b.id);
+  const stay = b.total_amount - items.reduce((a, i) => a + i.amount, 0);
   const vatOn = !!acc.vat_number;
   const vat = vatOn ? (b.total_amount * VAT) / (1 + VAT) : 0;
   const due = b.total_amount - b.paid_amount;
@@ -70,9 +73,17 @@ export default async function InvoicePage({ params }) {
             <tr>
               <td>إقامة في {b.unit_name}</td>
               <td>{nights}</td>
-              <td>{money(nights ? b.total_amount / nights : 0)}</td>
-              <td className="text-end">{money(b.total_amount)}</td>
+              <td>{money(nights ? stay / nights : 0)}</td>
+              <td className="text-end">{money(stay)}</td>
             </tr>
+            {items.map((it) => (
+              <tr key={it.id}>
+                <td>{it.label}</td>
+                <td>1</td>
+                <td />
+                <td className="text-end">{money(it.amount)}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
 

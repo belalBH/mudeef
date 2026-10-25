@@ -2,6 +2,9 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireUser } from '@/lib/auth';
 import { getUnit, listSeasons, unitBlocks, unitChannels } from '@/lib/queries';
+import { listOwners, unitPhotos } from '@/lib/queries-v3';
+import { deletePhoto, makeCover } from '@/lib/actions-v3';
+import { PhotoUpload } from '@/components/forms-v3';
 import { prettyDate } from '@/lib/dates';
 import { money } from '@/lib/constants';
 import { deleteBooking, deleteUnit } from '@/lib/actions';
@@ -20,6 +23,8 @@ export default async function UnitPage({ params, searchParams }) {
   const channels = unitChannels(user.account_id, unit.id);
   const base = await baseUrl();
   const blocks = unitBlocks(user.account_id, unit.id);
+  const photos = unitPhotos(unit.id);
+  const owners = listOwners(user.account_id);
   const seasons = listSeasons(user.account_id).filter((s) => s.unit_id === unit.id || s.unit_id == null);
 
   return (
@@ -46,7 +51,33 @@ export default async function UnitPage({ params, searchParams }) {
         <section>
           <h2 className="mb-3">بيانات الوحدة</h2>
           <div className="panel p-5">
-            <UnitForm unit={unit} />
+            <UnitForm unit={unit} owners={owners} />
+          </div>
+          <div className="panel mt-4 p-5">
+            <h3 className="mb-3 font-semibold">الصور ({photos.length})</h3>
+            {photos.length > 0 && (
+              <ul className="mb-4 grid grid-cols-3 gap-2">
+                {photos.map((p, i) => (
+                  <li key={p.id} className="group relative overflow-hidden rounded-md bg-paper">
+                    <img src={`/api/files/${p.file}`} alt="" className="aspect-[4/3] w-full object-cover" />
+                    {i === 0 && <span className="absolute start-1 top-1 rounded bg-palm px-1.5 text-xs text-white">الغلاف</span>}
+                    <div className="absolute inset-x-0 bottom-0 flex justify-between bg-ink/60 px-1.5 py-1 text-xs text-white">
+                      {i > 0 ? (
+                        <form action={makeCover}>
+                          <input type="hidden" name="id" value={p.id} />
+                          <button className="hover:underline">اجعلها الغلاف</button>
+                        </form>
+                      ) : <span />}
+                      <form action={deletePhoto}>
+                        <input type="hidden" name="id" value={p.id} />
+                        <button className="hover:underline" aria-label="حذف الصورة">حذف</button>
+                      </form>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <PhotoUpload unitId={unit.id} />
           </div>
           <div className="panel mt-4 p-5">
             <div className="mb-2 flex items-center justify-between">

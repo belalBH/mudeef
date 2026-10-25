@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { requireUser } from '@/lib/auth';
 import { assignees, listTasks, listUnits } from '@/lib/queries';
+import { teamMembers } from '@/lib/queries-v3';
 import { assignTask, deleteTask, toggleTask } from '@/lib/actions-more';
 import { prettyDate, todayISO, weekday } from '@/lib/dates';
 import { TASK_TYPES } from '@/lib/constants';
@@ -17,19 +18,23 @@ const VIEWS = [
 ];
 
 export default async function TasksPage({ searchParams }) {
-  const user = await requireUser();
+  const user = await requireUser(['owner', 'manager', 'cleaner']);
+  const cleaner = user.role === 'cleaner';
   const sp = await searchParams;
   const view = VIEWS.some(([k]) => k === sp.view) ? sp.view : 'today';
   const today = todayISO();
   const units = listUnits(user.account_id, { activeOnly: true });
-  const tasks = listTasks(user.account_id, view);
-  const people = assignees(user.account_id);
+  const tasks = listTasks(user.account_id, view).filter((t) => !cleaner || !t.assignee || t.assignee === user.name);
+  const people = [...new Set([...teamMembers(user.account_id).filter((m) => m.active && m.role === 'cleaner').map((m) => m.name), ...assignees(user.account_id)])];
 
   return (
     <>
-      <PageHead title="المهام والتنظيف" sub="مهمة تنظيف تنشأ تلقائياً يوم خروج كل ضيف، وتقدر تضيف مهام صيانة أو فحص." />
+      <PageHead
+        title={cleaner ? `مهامك يا ${user.name}` : 'المهام والتنظيف'}
+        sub={cleaner ? 'المهام المسندة لك وغير المسندة لأحد. اضغط المربع بعد ما تخلص.' : 'مهمة تنظيف تنشأ تلقائياً يوم خروج كل ضيف، وتقدر تضيف مهام صيانة أو فحص.'}
+      />
 
-      {units.length > 0 && (
+      {!cleaner && units.length > 0 && (
         <details className="panel mb-6 p-5">
           <summary className="cursor-pointer font-semibold text-palm">مهمة جديدة</summary>
           <div className="mt-4">
@@ -68,6 +73,7 @@ export default async function TasksPage({ searchParams }) {
                   </button>
                 </form>
                 <div className="min-w-0 flex-1">
+                  {cleaner && t.assignee === user.name && t.status === 'open' && <span className="mb-0.5 inline-block rounded bg-saffron-soft px-1.5 text-xs">مسندة لك</span>}
                   <p className={`font-semibold ${t.status === 'done' ? 'text-muted line-through' : ''}`}>
                     {t.unit_name}: {t.title || TASK_TYPES[t.type]}
                   </p>
@@ -79,12 +85,13 @@ export default async function TasksPage({ searchParams }) {
                     {t.booking_id && (
                       <>
                         {'، بعد خروج '}
-                        <Link href={`/bookings/${t.booking_id}`} className="underline underline-offset-2">{t.guest_name || 'الضيف'}</Link>
+                        {cleaner ? t.guest_name || 'الضيف' : <Link href={`/bookings/${t.booking_id}`} className="underline underline-offset-2">{t.guest_name || 'الضيف'}</Link>}
                       </>
                     )}
                     {t.note && `، ${t.note}`}
                   </p>
                 </div>
+                {!cleaner && (<>
                 <form action={assignTask} className="flex items-center gap-1">
                   <input type="hidden" name="id" value={t.id} />
                   <input name="assignee" defaultValue={t.assignee || ''} list="people-list" placeholder="المسؤول" aria-label="المسؤول" className="field w-32 py-1 text-sm" />
@@ -94,6 +101,7 @@ export default async function TasksPage({ searchParams }) {
                   <input type="hidden" name="id" value={t.id} />
                   <ConfirmButton className="text-xs text-danger hover:underline" message="حذف المهمة؟">حذف</ConfirmButton>
                 </form>
+                </>)}
               </li>
             );
           })}

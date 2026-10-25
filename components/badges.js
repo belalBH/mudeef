@@ -10,6 +10,8 @@ export function SourceTag({ source }) {
 }
 
 export function StatusTag({ booking }) {
+  if (booking.status === 'pending')
+    return <span className="rounded bg-saffron-soft px-2 py-0.5 text-xs font-semibold">طلب جديد</span>;
   if (booking.status === 'cancelled')
     return <span className="rounded bg-line/60 px-2 py-0.5 text-xs text-muted">{STATUSES.cancelled}</span>;
   if (booking.conflict)

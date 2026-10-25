@@ -10,6 +10,12 @@ export async function register() {
     running = true;
     try {
       const r = await syncAll();
+      try {
+        const { runRecurring } = await import('./lib/recurring');
+        runRecurring();
+      } catch (e) {
+        console.error('[recurring] failed', e);
+      }
       if (r.length) console.log(`[sync] ${new Date().toISOString()} synced ${r.length} channel(s)`);
     } catch (e) {
       console.error('[sync] failed', e);
